@@ -36,7 +36,7 @@ function M.new(buf, src, kind, extmark)
 
   self.id = Terminal.generate_id()
   self.buf = buf
-  self.img = Image.new(src)
+  self.img = Image.new(src, kind:match("^preview") ~= nil)
   self.img.placements[self.id] = self
   self.kind = kind
   self.eids = {}
@@ -72,6 +72,7 @@ function M:set_range(range)
 end
 
 function M:hide()
+  require("mathlive.image.wrap").request()
   if self.hidden then return end
   self.hidden = true
   self._range = nil
@@ -110,7 +111,7 @@ function M:replace(new_file)
   Renderer.unindex_multiline_inline(self)
 
   self.file = new_file
-  self.img = Image.new(new_file)
+  self.img = Image.new(new_file, self.kind:match("^preview") ~= nil)
   self.img.placements[self.id] = self
   self._grid = nil
   self._kitty_img_id = nil
@@ -138,6 +139,14 @@ end
 
 ---@param extmarks { row: integer, col: integer, [string]: any } []
 function M:_render(extmarks)
+  local wrap = require("mathlive.image.wrap")
+  if #wrap.legacy_windows() == 0 then
+    for _, eid in ipairs(self.eids) do
+      pcall(vim.api.nvim_buf_del_extmark, self.buf, ns, eid)
+    end
+    self.eids = {}
+    return
+  end
   for _, e in ipairs(extmarks) do
     e.undo_restore = false
     e.strict = false
@@ -162,18 +171,27 @@ end
 function M:render()
   if self.closed or self.hidden then return end
 
-  self.img:ensure_sent(function (supported)
+  local cell_size = Util.pixels_to_cells(self.img.size)
+  local wrap = require("mathlive.image.wrap")
+  if (self.kind == "inline_formula" or self.kind == "displayed_equation") and #wrap.legacy_windows() == 0 then
+    self:render_grid(cell_size)
+    wrap.request()
+    return
+  end
+  self.img:ensure_sent(function (supported, created)
     if not supported or self.closed or self.hidden then return end
-    local cell_size = Util.pixels_to_cells(self.img.size)
     local kitty_size = self._kitty_size
     if self._kitty_img_id ~= self.img.id or not kitty_size
       or kitty_size.width ~= cell_size.width or kitty_size.height ~= cell_size.height then
-      Terminal.create_virtual_placement(self.img.id, self.id, cell_size.width, cell_size.height)
+      if not created then
+        Terminal.create_virtual_placement(self.img.id, self.id, cell_size.width, cell_size.height)
+      end
       self._kitty_img_id = self.img.id
       self._kitty_size = cell_size
     end
     self:render_grid(cell_size)
-  end)
+    wrap.request()
+  end, {id=self.id, width=cell_size.width, height=cell_size.height})
 end
 
 return M

@@ -77,7 +77,9 @@ M.generate_id = (function ()
       nvim_pid = bit.band(bit.bxor(pid, bit.rshift(pid, 5), bit.rshift(pid, NVIM_PID_BITS)), 0x3FF)
     end
     cnt = cnt + 1
-    return bit.bor(bit.lshift(nvim_pid, 24 - NVIM_PID_BITS), cnt)
+    -- Addition keeps IDs unique when a long editing session crosses the
+    -- initial PID partition. OR would reuse IDs after 16,384 allocations.
+    return (bit.lshift(nvim_pid, 24 - NVIM_PID_BITS) + cnt) % 0xFFFFFF + 1
   end
 end)()
 
@@ -105,10 +107,22 @@ function M.seq(control, payload)
   return table.concat(parts)
 end
 
+local function placement_control(control, placement)
+  if placement then
+    control.a = "T"
+    control.U = 1
+    control.p = placement.id
+    control.c = placement.width
+    control.r = placement.height
+    control.C = 1
+  end
+  return control
+end
+
 --- Transmit image bytes to kitty in base64 chunks using direct transmission.
 ---@param id   integer kitty image id
 ---@param data string  raw image bytes
-function M.transmit(id, data)
+function M.transmit(id, data, placement)
   local chunk_size = 4096
   local base64_data = vim.base64.encode(data)
   local pos = 1
@@ -127,6 +141,7 @@ function M.transmit(id, data)
       control.t = "d"    -- Direct transmission
       control.i = id
       control.q = "2"  -- Suppress responses
+      placement_control(control, placement)
     end
 
     control.m = is_last and "0" or "1"
@@ -139,13 +154,13 @@ end
 --- Transmit a local PNG by file path.
 ---@param img_id integer
 ---@param file   string
-function M.transmit_local_png(img_id, file)
-  M.write(M.seq({
+function M.transmit_local_png(img_id, file, placement)
+  M.write(M.seq(placement_control({
       t = "f",
       i = img_id,
       f = 100,
       q = "2",
-    }, vim.base64.encode(file)))
+    }, placement), vim.base64.encode(file)))
 end
 
 --- Create an invisible Kitty virtual placement for unicode placeholder mode.
@@ -166,11 +181,30 @@ function M.create_virtual_placement(img_id, placement_id, width, height)
     }))
 end
 
---- Delete one virtual placement for an image.
+-- Retire graphics resources only after their placeholders are redrawn.
+local retired = {}
+local retiring = false
+
+local function retire(command)
+  retired[#retired + 1] = command
+  if retiring then return end
+  retiring = true
+  vim.schedule(function ()
+    local commands = retired
+    retired = {}
+    retiring = false
+    -- Remove the old placeholders from the terminal's screen before freeing
+    -- their images. Raw graphics commands can otherwise precede the redraw.
+    vim.cmd("redraw")
+    for _, data in ipairs(commands) do M.write(data) end
+  end)
+end
+
+--- Delete one virtual placement for an image after the screen is updated.
 ---@param img_id       integer
 ---@param placement_id integer
 function M.delete_placement(img_id, placement_id)
-  M.write(M.seq({
+  retire(M.seq({
       a = "d",
       d = "i",
       i = img_id,
@@ -182,7 +216,7 @@ end
 --- Delete an image allowing the terminal free its data.
 ---@param img_id integer
 function M.delete_image(img_id)
-  M.write(M.seq({
+  retire(M.seq({
       a = "d",
       d = "I",
       i = img_id,

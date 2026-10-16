@@ -17,12 +17,13 @@ M.__index = M
 local images = {}  ---@type table<string, mathlive.Image?>
 
 ---@param file string
-function M.new(file)
+---@param unique? boolean
+function M.new(file, unique)
   file = vim.fs.normalize(file)
   local fs_stat = vim.uv.fs_stat(file)
   assert(fs_stat, "Image does not exist: " .. file)
 
-  if images[file] and vim.deep_equal(images[file].mtime, fs_stat.mtime) then
+  if not unique and images[file] and vim.deep_equal(images[file].mtime, fs_stat.mtime) then
     return images[file]
   end
 
@@ -34,39 +35,47 @@ function M.new(file)
   self.sent = false
   self.placements = {}
 
-  images[file] = self
+  if not unique then images[file] = self end
 
   return self
 end
 
 -- create the image
-function M:send()
+function M:send(placement)
   assert(not self.sent, "Image already sent")
   self.sent = true
+  self:transmit(self.id, placement)
+end
+
+-- Each wrapped window owns a separate terminal image with its own dimensions.
+function M:transmit(id, placement)
   if vim.env.SSH_CLIENT or vim.env.SSH_CONNECTION then
     local fd = assert(io.open(self.file, "rb"), "Failed to open file: " .. self.file)
     local data = fd:read("*a")
     fd:close()
 
-    Terminal.transmit(self.id, data)
+    Terminal.transmit(id, data, placement)
   else
-    Terminal.transmit_local_png(self.id, self.file)
+    Terminal.transmit_local_png(id, self.file, placement)
   end
 end
 
----@param cb? fun(supported: boolean)
-function M:ensure_sent(cb)
+---@param cb? fun(supported: boolean, created?: boolean)
+---@param placement? {id: integer, width: integer, height: integer}
+function M:ensure_sent(cb, placement)
   Terminal.detect(function (supported)
     if not supported then
       if cb then cb(false) end
       return
     end
 
+    local created = false
     if not self.sent then
-      self:send()
+      self:send(placement)
+      created = placement ~= nil
     end
 
-    if cb then cb(true) end
+    if cb then cb(true, created) end
   end)
 end
 

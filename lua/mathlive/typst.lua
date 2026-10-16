@@ -103,7 +103,7 @@ end
 ---@param formula string
 function M.write_temp_formula(formula)
   local typst_input = get_typst_input(formula)
-  local file = io.open(State.cache_path .. "temp.typ", "w")
+  local file = io.open(State.preview_path .. "temp.typ", "w")
   if file then
     file:write(typst_input)
     file:close()
@@ -119,8 +119,8 @@ function M.watch(callback)
     "watch",
     "--ppi",
     tostring(Config.ppi),
-    State.cache_path .. "temp.typ",
-    State.cache_path .. "temp.png",
+    State.preview_path .. "temp.typ",
+    State.preview_path .. "temp.png",
   },
     {
       text = true,

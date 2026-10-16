@@ -95,6 +95,7 @@ end
 function M.setup(opts)
   Config.setup(opts)
   M.setup_autocmds()
+  require("mathlive.image.wrap").setup()
   attach_buffer(vim.api.nvim_get_current_buf())
 end
 
@@ -107,6 +108,7 @@ function M.setup_autocmds()
 
   vim.api.nvim_set_decoration_provider(State.ns, {
     on_win = function (_, win, buf, top, bot)
+      if require("mathlive.image.wrap").enabled(win) then return false end
       if win ~= vim.api.nvim_get_current_win() then
         provider_rows_by_win[win] = nil
         return false
@@ -211,6 +213,7 @@ function M.setup_autocmds()
     group = group,
     callback = function ()
       Preview.close_preview()
+      vim.fn.delete(State.preview_path, "rf")
     end,
   })
 end
@@ -222,6 +225,19 @@ function M.handle_cursor_moved(buf)
   end
 
   local row, col = unpack(vim.api.nvim_win_get_cursor(0))
+
+  -- Editing can replace a source extmark while its equation is in preview.
+  -- Compile draft entries once the cursor has left their new source range.
+  for id, entry in pairs(State.placements[buf] or {}) do
+    if not entry.placement and not entry.compiling and not entry.failed then
+      local range = Util.is_valid_extmark(buf, State.ns, id)
+      if range then
+        local inside = (row - 1 > range[1] or (row - 1 == range[1] and col >= range[2]))
+          and (row - 1 < range[3] or (row - 1 == range[3] and col <= range[4]))
+        if not inside then Formula.compile_formula(buf, id) end
+      end
+    end
+  end
 
   local prev_extmark = State.preview and State.preview.extmark
   local cur_extmark = Util.get_extmark(buf, State.ns, row - 1, col)

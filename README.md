@@ -9,6 +9,7 @@
 - Replaces source math with rendered images seamlessly inside Neovim.
 - Low latency preview that updates live while typing.
 - Supports [Typst](https://typst.app/) in `markdown` with `$inline$` or `$$display$$` blocks.
+- Wraps prose around complete equation images, with a separate layout for each window.
 
 ## Table of Contents
 - [Requirements](#requirements)
@@ -80,6 +81,20 @@ require("mathlive").setup({
 ```
 
 ## Compatibility
+
+### Wrapped prose
+
+With `wrap` enabled and `conceallevel` set to 2 or 3, mathlive lays out text and
+equations together. Images stay in one piece when a paragraph wraps, and wide
+equations scale to fit the window. Each split window uses its own width.
+
+The source line under the cursor stays visible for editing. Moving away restores
+its rendered view. Visual selections also reveal the source. The file contents
+are unchanged by rendering.
+
+Wrapped rendering uses Neovim's window-scoped namespace API (`nvim__ns_set`).
+Versions without that API retain the original renderer, which requires `nowrap`.
+
 ### [markview.nvim](https://github.com/OXY2DEV/markview.nvim)
 ```lua
 require("markview").setup({
@@ -137,7 +152,6 @@ require("render-markdown").setup({
 - Document/Implement autocomplete via [otter.nvim](https://github.com/jmbuhr/otter.nvim).
 - Document/Implement formatting inside math blocks via [conform.nvim](https://github.com/stevearc/conform.nvim).
 - LaTeX support via [tylax](https://github.com/scipenai/tylax).
-- `wrap` support (blocked by [this neovim issue](https://github.com/neovim/neovim/issues/33724)).
 - Replace the `typst` CLI dependency with [typst-lua](https://github.com/rousbound/typst-lua) lua bindings.
 
 ## Acknowledgements

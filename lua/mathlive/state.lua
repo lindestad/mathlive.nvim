@@ -5,6 +5,7 @@
 ---@field multiline_inline_rows table<integer, table<integer, true?>?>
 ---@field typst_process         vim.SystemObj?
 ---@field cache_path            string
+---@field preview_path          string
 local M = {}
 
 ---@class mathlive.state.Preview
@@ -34,5 +35,7 @@ if vim.fn.isdirectory(cache_path) == 0 then
   vim.fn.mkdir(cache_path, "p")
 end
 M.cache_path = cache_path
+M.preview_path = cache_path .. "preview-" .. vim.fn.getpid() .. "/"
+vim.fn.mkdir(M.preview_path, "p")
 
 return M

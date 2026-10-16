@@ -49,7 +49,7 @@ end
 ---@param extmark      integer
 ---@param prev_preview mathlive.state.PlacementEntry | mathlive.state.Preview
 function M.create(buf, extmark, prev_preview)
-  local image_path = prev_preview.path or (State.cache_path .. "temp.png")
+  local image_path = prev_preview.path or (State.preview_path .. "temp.png")
   State.preview = { buf = buf, extmark = extmark, path = prev_preview.path or "temp.png", kind = prev_preview.kind }
   local dim = Util.dim(image_path)
   local size = Util.pixels_to_cells(dim)
@@ -82,7 +82,7 @@ function M.update()
   local p = preview.p
   if not p then return end
 
-  p:replace(State.cache_path .. "temp.png")
+  p:replace(State.preview_path .. "temp.png")
   p:render()
 
   if p.kind == "preview_inline_formula" then
