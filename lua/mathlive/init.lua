@@ -11,6 +11,8 @@ local Util = require("mathlive.util")
 ---@class mathlive
 local M = {}
 local autocmds_initialized = false
+local pending_buffers = {}
+local retry_scheduled = false
 
 local function should_render_buf(buf)
   if not vim.api.nvim_buf_is_valid(buf) then return false end
@@ -72,20 +74,44 @@ local function on_formula_nodes(buf, formula_nodes)
   end)
 end
 
-local function attach_buffer(buf)
-  if not should_render_buf(buf) then return end
+local attach_buffer
+
+local function retry_pending_buffers()
+  if retry_scheduled or not next(pending_buffers) then return end
+  retry_scheduled = true
+  -- nvim-treesitter has no installation-completed event. TSUpdate fires
+  -- before installation, so retry while there are buffers waiting for parsers.
+  vim.defer_fn(function ()
+    retry_scheduled = false
+    for buf in pairs(pending_buffers) do
+      attach_buffer(buf)
+    end
+    retry_pending_buffers()
+  end, 1000)
+end
+
+attach_buffer = function (buf)
+  if not should_render_buf(buf) or not vim.api.nvim_buf_is_loaded(buf) then
+    pending_buffers[buf] = nil
+    return
+  end
 
   Formula.cleanup_buffer(buf)
   Scanner.detach(buf)
 
-  -- Start scanning immediately, stop later if terminal detection fails
+  if not Scanner.attach(buf, on_formula_nodes) then
+    pending_buffers[buf] = true
+    retry_pending_buffers()
+    return
+  end
+  pending_buffers[buf] = nil
+
+  -- Stop scanning if terminal detection fails.
   Terminal.detect(function (supported)
     if supported or not vim.api.nvim_buf_is_valid(buf) then return end
     Formula.cleanup_buffer(buf)
     Scanner.detach(buf)
   end)
-
-  Scanner.attach(buf, on_formula_nodes)
 
   vim.schedule(function ()
     M.handle_cursor_moved(buf)
@@ -199,6 +225,7 @@ function M.setup_autocmds()
   vim.api.nvim_create_autocmd({ "BufUnload", "BufWipeout", "BufDelete" }, {
     group = group,
     callback = function (e)
+      pending_buffers[e.buf] = nil
       if State.preview and State.preview.buf == e.buf then
         Preview.close_preview()
       end

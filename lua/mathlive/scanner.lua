@@ -8,10 +8,12 @@ local M = {}
 
 local attached_trees = {}  ---@type table<integer, table<TSTree, boolean>?>
 
-local math_query = vim.treesitter.query.parse("latex", [[
-  (inline_formula) @m
-  (displayed_equation) @m
-]])
+local math_query  ---@type vim.treesitter.Query?
+
+local function have_language(lang)
+  local ok, loaded = pcall(vim.treesitter.language.add, lang)
+  return ok and loaded
+end
 
 ---@param buf    integer
 ---@param parser vim.treesitter.LanguageTree
@@ -82,14 +84,27 @@ end
 
 ---@param buf       integer
 ---@param on_change fun(buf: integer, formula_nodes: TSNode[])
+---@return boolean attached
 function M.attach(buf, on_change)
-  if attached_trees[buf] then return end
+  if attached_trees[buf] then return true end
+
+  -- Parsers may still be installing on the first launch. Do not cache an
+  -- attachment until both the document and its math injections can be parsed.
+  if not have_language("latex") then return false end
+  local ok, main_parser = pcall(vim.treesitter.get_parser, buf)
+  if not ok or not main_parser then return false end
+  if main_parser:lang() == "markdown" and not have_language("markdown_inline") then return false end
+
+  math_query = math_query or vim.treesitter.query.parse("latex", [[
+    (inline_formula) @m
+    (displayed_equation) @m
+  ]])
 
   Util.ensure_table(State.placements, buf)
   attached_trees[buf] = {}
-
-  local main_parser = vim.treesitter.get_parser(buf)
-  if not main_parser then return end
+  -- Highlighting may have cached a complete parse while injection parsers
+  -- were absent. Revisit those injections now that all parsers are available.
+  main_parser:invalidate()
   main_parser:parse(true)
 
   vim.api.nvim_buf_attach(buf, false, {
@@ -128,6 +143,7 @@ function M.attach(buf, on_change)
       on_change(buf, changed)
     end
   end)
+  return true
 end
 
 function M.detach(buf)
